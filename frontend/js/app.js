@@ -1,17 +1,10 @@
-/**
- * app.js
- * ---------------------------------------------------------------
- * Wires together api.js (data), graph-renderer.js (drawing), and
- * progress-tracker.js (localStorage) for the citizen-facing page.
- * ---------------------------------------------------------------
- */
+
 (async function () {
   const els = {
     form: document.getElementById("task-form"),
     input: document.getElementById("task-input"),
     state: document.getElementById("state-input"),
     city: document.getElementById("city-input"),
-    modeBadge: document.getElementById("mode-badge"),
     resultArea: document.getElementById("result-area"),
     emptyState: document.getElementById("empty-state"),
     taskTitle: document.getElementById("task-title"),
@@ -29,12 +22,6 @@
   let currentTask = null;
   let selectedStepId = null;
 
-  els.modeBadge.textContent = "Checking data source…";
-  API.isLiveBackend().then((live) => {
-    els.modeBadge.textContent = live ? "Live backend" : "Demo data";
-    els.modeBadge.classList.toggle("badge-live", live);
-    els.modeBadge.classList.toggle("badge-demo", !live);
-  });
 
   els.form.addEventListener("submit", async (e) => {
     e.preventDefault();

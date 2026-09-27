@@ -5,48 +5,63 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin — Civic Task Navigator</title>
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
   <link
     href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap"
     rel="stylesheet" />
+
   <link rel="stylesheet" href="css/main.css" />
   <link rel="stylesheet" href="css/admin.css" />
 </head>
 
 <body>
+
   <div id="google_translate_element"></div>
+
   <header class="site-header">
     <div class="header-inner">
+
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">◈</span>
+
         <div>
           <h1>Admin dashboard</h1>
-          <p class="tagline">Review and correct extracted government data.</p>
+          <p class="tagline">
+            Review and correct extracted government data.
+          </p>
         </div>
       </div>
+
       <div class="header-links">
         <div id="google_translate_element"></div>
-        <span id="mode-badge" class="badge">Checking data source…</span>
-        <a href="index.html" class="admin-link">← Citizen view</a>
+
+        <a href="index.html" class="admin-link">
+          ← Citizen view
+        </a>
       </div>
+
     </div>
   </header>
 
+
   <main class="page admin-page">
-    <div id="demo-notice" class="demo-notice" hidden>
-      Running in demo mode: edits apply in this tab only and reset on reload.
-      Start the backend (<code>cd backend && npm start</code>) to persist changes to
-      <code>backend/data/tasks.json</code>.
-    </div>
 
     <div class="admin-toolbar">
+
       <label for="task-select">Task</label>
+
       <select id="task-select"></select>
+
       <span id="step-count" class="step-count"></span>
+
     </div>
 
+
     <table class="admin-table">
+
       <thead>
         <tr>
           <th>Step</th>
@@ -57,18 +72,31 @@
           <th></th>
         </tr>
       </thead>
+
       <tbody id="admin-tbody"></tbody>
+
     </table>
 
-    <button id="add-step-btn" class="add-step-btn">+ Add a step</button>
+
+    <button id="add-step-btn" class="add-step-btn">
+      + Add a step
+    </button>
+
   </main>
 
-  <aside id="edit-panel" class="edit-panel" aria-hidden="true"></aside>
-  <div id="edit-backdrop" class="drawer-backdrop"></div>
+
+  <aside id="edit-panel" class="edit-panel" aria-hidden="true">
+  </aside>
+
+  <div id="edit-backdrop" class="drawer-backdrop">
+  </div>
+
 
   <script src="js/sample-data.js"></script>
   <script src="js/api.js"></script>
   <script src="js/admin.js"></script>
+
+
   <script>
     function googleTranslateElementInit() {
       new google.translate.TranslateElement(
@@ -82,8 +110,8 @@
     }
   </script>
 
-  <script src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit">
-  </script>
+  <script src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+
 </body>
 
 </html>
