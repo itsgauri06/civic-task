@@ -1,3 +1,13 @@
+// Load backend/.env (ANTHROPIC_API_KEY etc.) if present. Uses Node's built-in
+// loader (no dotenv dependency needed) — safe to skip if the file doesn't
+// exist, e.g. before Level 2 is set up, so Level 1 (rule-based) still runs.
+try {
+  process.loadEnvFile(require("path").join(__dirname, ".env"));
+} catch (err) {
+  // No backend/.env yet — fine for Level 1. Level 2's /api/chat route
+  // reports this itself (as a 501) if ANTHROPIC_API_KEY is missing.
+}
+
 const express = require("express");
 const cors = require("cors");
 const tasksRouter = require("./routes/tasks");
