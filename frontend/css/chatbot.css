@@ -1,0 +1,219 @@
+/* =========================================================
+   TASK ASSISTANT — rule-based chatbot widget
+   Reuses the design tokens defined in main.css (:root).
+   ========================================================= */
+
+#cb-root {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1000;
+  font-family: var(--font-body, sans-serif);
+}
+
+.cb-toggle {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: var(--seal, #4f46e5);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  box-shadow: var(--shadow-lg, 0 18px 45px rgba(31, 41, 75, 0.13));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.cb-toggle:hover {
+  transform: scale(1.06);
+  background: var(--seal-dark, #3730a3);
+}
+
+.cb-panel {
+  position: absolute;
+  right: 0;
+  bottom: 68px;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  height: 460px;
+  max-height: calc(100vh - 120px);
+  background: var(--paper-raised, #fff);
+  border: 1px solid var(--line, #e5e8f2);
+  border-radius: var(--radius-lg, 18px);
+  box-shadow: var(--shadow-lg, 0 18px 45px rgba(31, 41, 75, 0.13));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cb-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--seal-soft, #eef0ff);
+  border-bottom: 1px solid var(--line, #e5e8f2);
+}
+
+.cb-header-title {
+  margin: 0;
+  font-family: var(--font-display, serif);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink, #17213d);
+}
+
+.cb-header-sub {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--ink-muted, #929bb0);
+}
+
+.cb-close {
+  border: none;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--ink-soft, #68728b);
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.cb-close:hover {
+  color: var(--ink, #17213d);
+}
+
+.cb-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--paper, #f6f7ff);
+}
+
+.cb-msg {
+  max-width: 85%;
+  padding: 9px 12px;
+  border-radius: var(--radius-md, 12px);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.cb-msg-bot {
+  align-self: flex-start;
+  background: var(--paper-raised, #fff);
+  border: 1px solid var(--line, #e5e8f2);
+  color: var(--ink, #17213d);
+  border-bottom-left-radius: 4px;
+}
+
+.cb-msg-user {
+  align-self: flex-end;
+  background: var(--seal, #4f46e5);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.cb-bullet {
+  display: block;
+}
+
+.cb-typing {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 12px 14px;
+}
+
+.cb-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-muted, #929bb0);
+  animation: cb-bounce 1.2s infinite ease-in-out;
+}
+
+.cb-typing span:nth-child(2) { animation-delay: 0.15s; }
+.cb-typing span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes cb-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+.cb-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 14px 10px;
+  background: var(--paper, #f6f7ff);
+}
+
+.cb-chip {
+  border: 1px solid var(--line-dark, #d5d9e6);
+  background: var(--paper-raised, #fff);
+  color: var(--seal, #4f46e5);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.cb-chip:hover {
+  background: var(--seal-soft, #eef0ff);
+  border-color: var(--seal-light, #818cf8);
+}
+
+.cb-form {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--line, #e5e8f2);
+  background: var(--paper-raised, #fff);
+}
+
+.cb-input {
+  flex: 1;
+  border: 1px solid var(--line-dark, #d5d9e6);
+  border-radius: var(--radius-sm, 8px);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--ink, #17213d);
+}
+
+.cb-input:focus {
+  outline: none;
+  border-color: var(--seal, #4f46e5);
+}
+
+.cb-send {
+  border: none;
+  background: var(--seal, #4f46e5);
+  color: #fff;
+  border-radius: var(--radius-sm, 8px);
+  width: 36px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.cb-send:hover {
+  background: var(--seal-dark, #3730a3);
+}
+
+@media (max-width: 420px) {
+  #cb-root {
+    right: 12px;
+    bottom: 12px;
+  }
+  .cb-panel {
+    width: calc(100vw - 24px);
+  }
+}
