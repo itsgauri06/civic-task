@@ -281,10 +281,10 @@
     "summary": "Apply for a Permanent Account Number (PAN) through an authorised PAN service provider.",
     "steps": [
       {
-        "id": "pan-application",
-        "title": "Submit a PAN application",
+        "id": "pan-prepare",
+        "title": "Prepare the required PAN information and documents",
         "office": "Income Tax Department / authorised PAN service provider",
-        "description": "Complete the PAN application with the required personal details and submit the required identity, address, and date-of-birth information.",
+        "description": "Prepare the personal details and supporting information needed for the PAN application, including proof of identity, proof of address, proof of date of birth, and a recent photograph where applicable.",
         "documentsNeeded": [
           "Proof of identity",
           "Proof of address",
@@ -297,6 +297,48 @@
         "sourceUrl": "https://www.incometax.gov.in/",
         "lastVerifiedAt": "2026-09-27",
         "dependsOn": [],
+        "status": "published"
+      },
+      {
+        "id": "pan-fill-application",
+        "title": "Complete the PAN application",
+        "office": "Income Tax Department / authorised PAN service provider",
+        "description": "Complete the PAN application with the required personal details and provide the required identity, address, and date-of-birth information.",
+        "documentsNeeded": [
+          "Proof of identity",
+          "Proof of address",
+          "Proof of date of birth",
+          "Recent photograph where applicable"
+        ],
+        "fee": "Applicable PAN application fee",
+        "estimatedTime": "Varies",
+        "eligibility": "Individuals and eligible entities requiring a PAN",
+        "sourceUrl": "https://www.incometax.gov.in/",
+        "lastVerifiedAt": "2026-09-27",
+        "dependsOn": [
+          "pan-prepare"
+        ],
+        "status": "published"
+      },
+      {
+        "id": "pan-submit",
+        "title": "Submit the PAN application",
+        "office": "Income Tax Department / authorised PAN service provider",
+        "description": "Submit the completed PAN application along with the required supporting information and documents.",
+        "documentsNeeded": [
+          "Proof of identity",
+          "Proof of address",
+          "Proof of date of birth",
+          "Recent photograph where applicable"
+        ],
+        "fee": "Applicable PAN application fee",
+        "estimatedTime": "Varies",
+        "eligibility": "Individuals and eligible entities requiring a PAN",
+        "sourceUrl": "https://www.incometax.gov.in/",
+        "lastVerifiedAt": "2026-09-27",
+        "dependsOn": [
+          "pan-fill-application"
+        ],
         "status": "published"
       }
     ]

@@ -1976,3 +1976,129 @@ select:focus-visible {
   color: #000000;
   margin-left: 4px;
 }
+/* ---- Empty State / Civic Compass ---- */
+
+.empty-state {
+  background: linear-gradient(
+    135deg,
+    #ffffff 0%,
+    #f7f7ff 100%
+  );
+
+  border: 1px solid rgba(13, 59, 102, 0.08);
+  border-radius: 24px;
+
+  padding: 42px 48px;
+  margin-top: 36px;
+
+  text-align: center;
+
+  box-shadow: 0 15px 40px rgba(30, 40, 100, 0.08);
+}
+
+.empty-eyebrow {
+  margin: 0 0 10px;
+
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+
+  letter-spacing: 2px;
+  font-weight: 500;
+
+  color: #4a45b8;
+}
+
+.empty-state h2 {
+  margin: 0;
+
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 3vw, 2.5rem);
+
+  color: #17213c;
+}
+
+.empty-description {
+  max-width: 650px;
+
+  margin: 14px auto 30px;
+
+  color: #6d7285;
+
+  font-size: 0.98rem;
+  line-height: 1.7;
+}
+
+/* Three feature cards */
+
+.feature-row {
+  display: grid;
+
+  grid-template-columns: repeat(3, 1fr);
+
+  gap: 14px;
+
+  text-align: left;
+}
+
+.feature-card {
+  padding: 20px;
+
+  background: #ffffff;
+
+  border: 1px solid #e8e9f2;
+
+  border-radius: 16px;
+
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.feature-card:hover {
+  transform: translateY(-3px);
+
+  box-shadow:
+    0 10px 25px rgba(30, 40, 100, 0.08);
+}
+
+.feature-number {
+  font-family: var(--font-mono);
+
+  font-size: 0.72rem;
+
+  color: #4a45b8;
+}
+
+.feature-card h3 {
+  margin: 8px 0 6px;
+
+  font-family: var(--font-body);
+
+  font-size: 1rem;
+
+  color: #17213c;
+}
+
+.feature-card p {
+  margin: 0;
+
+  color: #7a7f91;
+
+  font-size: 0.84rem;
+
+  line-height: 1.5;
+}
+
+/* Mobile */
+
+@media (max-width: 700px) {
+
+  .empty-state {
+    padding: 30px 20px;
+  }
+
+  .feature-row {
+    grid-template-columns: 1fr;
+  }
+
+}

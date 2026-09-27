@@ -1,531 +1,1992 @@
-
-Chatbot · JS
 /**
  * chatbot.js
  * ---------------------------------------------------------------
- * Level 1: a smart rule-based chatbot for the 4 existing tasks.
- * Built with the Level 2/3 upgrade path in mind — see CONFIG and
- * getReply() below for the exact seam a future LLM call plugs into.
+ * Level 2 Civic Task Assistant
  *
- * No API key, no LLM call — just keyword matching + a small set of
- * question-type rules, running entirely against the same API.js
- * that the rest of the app uses (so it works in both "Live backend"
- * and "Demo data" mode automatically).
- *
- * Owns: the floating chat widget (button + panel) and everything in
- * this file. It injects its own DOM, so no other file needs to
- * change for it to work — just add <script src="js/chatbot.js">
- * after api.js in index.html (and admin.html if wanted).
- *
- * UPGRADE NOTES (read this before starting Level 2 or 3):
- *
- * Level 2 (LLM chatbot):
- *   - Flip CONFIG.mode to "llm" and implement callLlmBackend() below.
- *   - Do NOT call an LLM API directly from this file with a client-side
- *     key — add a backend route (e.g. backend/routes/chat.js, mounted
- *     in server.js next to /api/tasks) that holds the API key server-side,
- *     and have callLlmBackend() POST to it. Send `history` (already
- *     tracked below) plus the matched task's JSON as grounding context,
- *     so the model answers from your real data instead of guessing.
- *   - getReply() already tries the configured responder first and falls
- *     back to the rule engine on any failure — keep that fallback when
- *     you wire in the LLM call, so the widget still works if the API
- *     is down or a key isn't set.
- *
- * Level 3 (advanced):
- *   - Location-aware: the main form already collects state/city
- *     (#state-input, #city-input) — read them into CONFIG.location and
- *     pass along with the LLM request, or use them to filter step data.
- *   - Official-source searching: backend/services/webSearch.js and
- *     backend/data/officialSources.json already exist for this — a new
- *     backend route can call searchOfficialWeb() and return citations
- *     alongside the answer.
- *   - Longer-term memory: `history` here only lives for the page session.
- *     Persist it the same way progress-tracker.js and search-history.js
- *     already persist their state, if you want it to survive a reload.
+ * - Uses /api/chat for the AI response
+ * - Sends conversation history for follow-up questions
+ * - Sends city/state from the main form
+ * - Displays official source links returned by the backend
+ * - Falls back to the Level 1 rule engine if the backend/LLM fails
+ * - Uses the same task data/API as the rest of the application
  * ---------------------------------------------------------------
  */
+
 (function () {
-  // ---- 0. Config — the one flag Level 2 flips ---------------------------
+  "use strict";
+
+  // ===============================================================
+  // 1. CONFIG
+  // ===============================================================
+
   const CONFIG = {
-    mode: "llm", // "rule" (Level 1) | "llm" (Level 2). getReply() falls back
-                 // to "rule" automatically if the backend errors or 501s
-                 // (e.g. no ANTHROPIC_API_KEY set yet), so this is safe to
-                 // leave on even before backend/.env is configured.
-    llmEndpoint: "/api/chat" // backend route; never call an LLM API directly from the browser
+    mode: "llm",
+    llmEndpoint: "/api/chat",
+    maxHistory: 12,
+    fallbackOnError: true
   };
- 
-  // Rolling transcript, kept independent of the rule engine's own
-  // taskId/stepId memory below. Not used by Level 1 logic today, but
-  // this is exactly what a Level 2 LLM call needs to answer follow-ups
-  // ("and how much does that cost?") — so it's tracked from day one.
-  const MAX_HISTORY = 12;
+
+
+  // ===============================================================
+  // 2. CONVERSATION HISTORY
+  // ===============================================================
+
   const history = [];
+
   function pushHistory(role, text) {
-    history.push({ role, text });
-    if (history.length > MAX_HISTORY) history.shift();
+    if (!text) return;
+
+    history.push({
+      role,
+      text
+    });
+
+    while (history.length > CONFIG.maxHistory) {
+      history.shift();
+    }
   }
- 
-  // ---- 1. Hand-curated aliases for the 4 known tasks -------------------
-  // Keep this mirrored with task ids in backend/data/tasks.json. Adding a
-  // 5th task later just means adding one more entry here.
+
+
+  // ===============================================================
+  // 3. TASK ALIASES
+  // ===============================================================
+
   const TASK_ALIASES = {
+
     "register-small-business-in": [
-      "business", "small business", "company", "startup", "shop", "enterprise",
-      "register a business", "registering a business", "msme", "udyam",
-      "incorporate", "incorporation", "llp", "pvt ltd", "private limited",
-      "proprietorship", "gst", "trade license", "trade licence"
+      "business",
+      "small business",
+      "company",
+      "startup",
+      "shop",
+      "enterprise",
+      "msme",
+      "udyam",
+      "incorporate",
+      "incorporation",
+      "llp",
+      "pvt ltd",
+      "private limited",
+      "proprietorship",
+      "gst",
+      "trade license",
+      "trade licence"
     ],
+
     "apply-passport-in": [
-      "passport", "travel document", "psk", "passport seva",
-      "renew passport", "renew my passport", "apply for a passport", "visa"
+      "passport",
+      "passport seva",
+      "psk",
+      "travel document",
+      "renew passport",
+      "renew my passport"
     ],
+
     "apply-pan-in": [
-      "pan", "pan card", "permanent account number", "tax id", "income tax pan"
+      "pan",
+      "pan card",
+      "permanent account number",
+      "tax id",
+      "income tax pan"
     ],
+
     "apply-driving-license-in": [
-      "driving licence", "driving license", "driver's license", "drivers license",
-      "dl", "learner's licence", "learners licence", "learner licence",
-      "learner's license", "rto", "driving test"
+      "driving licence",
+      "driving license",
+      "driver's license",
+      "drivers license",
+      "learner's licence",
+      "learners licence",
+      "learner licence",
+      "learner's license",
+      "rto",
+      "driving test"
     ]
   };
- 
+
+
+  // ===============================================================
+  // 4. RULE ENGINE
+  // ===============================================================
+
   const STOPWORDS = new Set([
-    "the", "and", "for", "with", "this", "that", "your", "from", "have",
-    "what", "when", "where", "does", "how", "much", "long", "will", "need",
-    "about", "into", "step", "steps", "task", "tasks", "apply", "application"
+    "the",
+    "and",
+    "for",
+    "with",
+    "this",
+    "that",
+    "your",
+    "from",
+    "have",
+    "what",
+    "when",
+    "where",
+    "does",
+    "how",
+    "much",
+    "long",
+    "will",
+    "need",
+    "about",
+    "into",
+    "step",
+    "steps",
+    "task",
+    "tasks",
+    "apply",
+    "application",
+    "can",
+    "you",
+    "tell",
+    "me"
   ]);
- 
-  // Short acronyms that would otherwise be dropped by the length filter
-  // but are highly distinctive (worth more than an ordinary word match).
-  const ACRONYMS = new Set(["gst", "pan", "dl", "rto"]);
- 
-  // ---- 2. Question-type patterns, most specific first -------------------
+
+  const ACRONYMS = new Set([
+    "gst",
+    "pan",
+    "dl",
+    "rto"
+  ]);
+
+
   const QUESTION_TYPES = [
-    { type: "documents", re: /\b(document|documents|papers|paperwork|proof|id proof|what.*(need|bring|carry))\b/i },
-    { type: "fee", re: /\b(fee|fees|cost|price|charge|charges|how much)\b/i },
-    { type: "time", re: /\b(how long|duration|turnaround|takes?|days?\b|weeks?\b)\b/i },
-    { type: "office", re: /\b(where|office|department|authority|whom|which office|who do i)\b/i },
-    { type: "eligibility", re: /\b(eligib|who can|qualify|allowed to)\b/i },
-    { type: "next", re: /\b(next|after (this|that)|then what|what.*next)\b/i },
-    { type: "count", re: /\b(how many steps|number of steps)\b/i },
-    { type: "overview", re: /\b(steps|procedure|process|how do i|walk me through|guide|what.*do i (need to )?do)\b/i }
+
+    {
+      type: "documents",
+      re: /\b(document|documents|paper|papers|paperwork|proof|id proof|what.*need|what.*bring|what.*carry)\b/i
+    },
+
+    {
+      type: "fee",
+      re: /\b(fee|fees|cost|price|charge|charges|how much|payment|pay)\b/i
+    },
+
+    {
+      type: "time",
+      re: /\b(how long|duration|turnaround|takes?|days?|weeks?|time|when.*complete)\b/i
+    },
+
+    {
+      type: "office",
+      re: /\b(where|office|department|authority|whom|which office|who handles|where.*apply|where.*go)\b/i
+    },
+
+    {
+      type: "eligibility",
+      re: /\b(eligib|who can|qualify|allowed|requirement|requirements)\b/i
+    },
+
+    {
+      type: "next",
+      re: /\b(next|after (this|that)|then what|what.*next|afterwards|afterward)\b/i
+    },
+
+    {
+      type: "count",
+      re: /\b(how many steps|number of steps|how many stages)\b/i
+    },
+
+    {
+      type: "overview",
+      re: /\b(steps|procedure|process|how do i|walk me through|guide|what.*do i.*do|how can i)\b/i
+    }
   ];
- 
-  const GREETING_RE = /^\s*(hi|hello|hey|hola|namaste|yo)\b/i;
-  const THANKS_RE = /\b(thanks|thank you|thx|cheers)\b/i;
-  const BYE_RE = /\b(bye|goodbye|see ya|that'?s all)\b/i;
-  const HELP_RE = /\b(help|what can you do|what do you do|capabilities)\b/i;
-  const LIST_RE = /\b(what tasks|list (of )?tasks|what (all )?can i ask|options|what topics)\b/i;
- 
-  // ---- 3. Small in-memory cache of all 4 tasks (full step detail) ------
-  let taskCache = null; // { [taskId]: task }
+
+
+  const GREETING_RE =
+    /^\s*(hi|hello|hey|hola|namaste|yo)\b/i;
+
+  const THANKS_RE =
+    /\b(thanks|thank you|thx|cheers)\b/i;
+
+  const BYE_RE =
+    /\b(bye|goodbye|see ya|that's all|that is all)\b/i;
+
+  const HELP_RE =
+    /\b(help|what can you do|what do you do|capabilities|how can you help)\b/i;
+
+  const LIST_RE =
+    /\b(what tasks|list (of )?tasks|what (all )?can i ask|options|what topics)\b/i;
+
+
+  // ===============================================================
+  // 5. TASK DATA CACHE
+  // ===============================================================
+
+  let taskCache = null;
   let loadPromise = null;
- 
-  function loadAllTasks() {
-    if (loadPromise) return loadPromise;
-    loadPromise = (async () => {
+
+
+  async function loadAllTasks() {
+
+    if (loadPromise) {
+      return loadPromise;
+    }
+
+    loadPromise = (async function () {
+
+      if (
+        typeof API === "undefined" ||
+        typeof API.listTasks !== "function" ||
+        typeof API.getTask !== "function"
+      ) {
+        throw new Error(
+          "Task API is not available"
+        );
+      }
+
       const summaries = await API.listTasks();
-      const full = await Promise.all(summaries.map((t) => API.getTask(t.id)));
-      taskCache = Object.fromEntries(full.map((t) => [t.id, t]));
+
+      const fullTasks = await Promise.all(
+        summaries.map(function (task) {
+          return API.getTask(task.id);
+        })
+      );
+
+      taskCache = Object.fromEntries(
+        fullTasks.map(function (task) {
+          return [task.id, task];
+        })
+      );
+
       return taskCache;
+
     })();
+
     return loadPromise;
   }
- 
+
+
+  // ===============================================================
+  // 6. TEXT HELPERS
+  // ===============================================================
+
   function words(str) {
+
     return (str || "")
       .toLowerCase()
       .split(/[^a-z0-9']+/)
-      .filter((w) => (w.length > 3 || ACRONYMS.has(w)) && !STOPWORDS.has(w));
+      .filter(function (word) {
+
+        return (
+          (word.length > 3 || ACRONYMS.has(word)) &&
+          !STOPWORDS.has(word)
+        );
+
+      });
   }
- 
-  // Crude 6-char-prefix stemming — just enough to treat "register" and
-  // "registration" (or "document"/"documents") as the same word, without
-  // pulling in a real stemming library for a rule-based Level 1 bot.
+
+
   function stem(word) {
-    return word.length <= 6 ? word : word.slice(0, 6);
+
+    if (!word) {
+      return "";
+    }
+
+    return word.length <= 6
+      ? word
+      : word.slice(0, 6);
   }
- 
-  // Words in a step's title that also show up in its own task's title
-  // (e.g. "business" inside every step of "Register a small business")
-  // aren't distinctive — matching on them would make every step of a
-  // task look equally relevant. Strip those before scoring a step.
-  function distinctiveStepWords(step, task) {
-    const titleStems = new Set(words(task.title).map(stem));
-    return words(step.title)
-      .map((w) => ({ word: w, stem: stem(w) }))
-      .filter((o) => !titleStems.has(o.stem));
-  }
- 
+
+
+  // ===============================================================
+  // 7. TASK MATCHING
+  // ===============================================================
+
   function matchTask(text) {
+
     const needle = text.toLowerCase();
-    let best = null, bestScore = 0;
-    for (const task of Object.values(taskCache)) {
+
+    let bestTask = null;
+    let bestScore = 0;
+
+    Object.values(taskCache || {}).forEach(function (task) {
+
       let score = 0;
-      for (const alias of TASK_ALIASES[task.id] || []) {
-        if (needle.includes(alias)) score += 2;
+
+      const aliases =
+        TASK_ALIASES[task.id] || [];
+
+      aliases.forEach(function (alias) {
+
+        if (needle.includes(alias)) {
+
+          score +=
+            alias.length > 5
+              ? 2
+              : 1;
+        }
+
+      });
+
+
+      words(task.title).forEach(function (word) {
+
+        if (needle.includes(word)) {
+          score += 1;
+        }
+
+      });
+
+
+      if (score > bestScore) {
+
+        bestScore = score;
+        bestTask = task;
+
       }
-      for (const w of words(task.title)) {
-        if (needle.includes(w)) score += 1;
-      }
-      if (score > bestScore) { bestScore = score; best = task; }
-    }
-    return bestScore > 0 ? best : null;
+
+    });
+
+    return bestScore > 0
+      ? bestTask
+      : null;
   }
- 
-  function scoreStep(step, task, needle) {
+
+
+  // ===============================================================
+  // 8. STEP MATCHING
+  // ===============================================================
+
+  function distinctiveStepWords(step, task) {
+
+    const taskWords =
+      new Set(
+        words(task.title).map(stem)
+      );
+
+    return words(step.title)
+      .map(function (word) {
+
+        return {
+          word,
+          stem: stem(word)
+        };
+
+      })
+      .filter(function (item) {
+
+        return !taskWords.has(item.stem);
+
+      });
+  }
+
+
+  function scoreStep(step, task, text) {
+
+    const needle =
+      text.toLowerCase();
+
     let score = 0;
-    for (const { word, stem: s } of distinctiveStepWords(step, task)) {
-      if (needle.includes(s)) score += ACRONYMS.has(word) ? 2 : 1;
-    }
+
+    distinctiveStepWords(
+      step,
+      task
+    ).forEach(function (item) {
+
+      if (
+        needle.includes(item.stem)
+      ) {
+
+        score +=
+          ACRONYMS.has(item.word)
+            ? 2
+            : 1;
+
+      }
+
+    });
+
     return score;
   }
- 
-  // Search every step of every task for a title match, regardless of
-  // whether the task itself was named this turn — lets people jump
-  // straight to "what documents do I need for GST registration".
-  function matchStepGlobal(text) {
-    const needle = text.toLowerCase();
-    let best = null, bestScore = 0, bestTask = null;
-    for (const task of Object.values(taskCache)) {
-      for (const step of task.steps) {
-        const score = scoreStep(step, task, needle);
-        if (score > bestScore) { bestScore = score; best = step; bestTask = task; }
+
+
+  function matchStepWithinTask(
+    text,
+    task
+  ) {
+
+    let bestStep = null;
+    let bestScore = 0;
+
+    (task.steps || []).forEach(
+      function (step) {
+
+        const score =
+          scoreStep(
+            step,
+            task,
+            text
+          );
+
+        if (score > bestScore) {
+
+          bestScore = score;
+          bestStep = step;
+
+        }
+
       }
-    }
-    return bestScore >= 2 ? { task: bestTask, step: best } : null;
+    );
+
+    return bestScore > 0
+      ? bestStep
+      : null;
   }
- 
-  function matchStepWithinTask(text, task) {
-    const needle = text.toLowerCase();
-    let best = null, bestScore = 0;
-    for (const step of task.steps) {
-      const score = scoreStep(step, task, needle);
-      if (score > bestScore) { bestScore = score; best = step; }
-    }
-    return bestScore > 0 ? best : null;
+
+
+  function matchStepGlobal(text) {
+
+    let bestTask = null;
+    let bestStep = null;
+    let bestScore = 0;
+
+    Object.values(
+      taskCache || {}
+    ).forEach(function (task) {
+
+      (task.steps || []).forEach(
+        function (step) {
+
+          const score =
+            scoreStep(
+              step,
+              task,
+              text
+            );
+
+          if (score > bestScore) {
+
+            bestScore = score;
+            bestTask = task;
+            bestStep = step;
+
+          }
+
+        }
+      );
+
+    });
+
+    return bestScore >= 2
+      ? {
+          task: bestTask,
+          step: bestStep
+        }
+      : null;
   }
- 
+
+
+  // ===============================================================
+  // 9. QUESTION TYPE
+  // ===============================================================
+
   function matchQuestionType(text) {
-    for (const { type, re } of QUESTION_TYPES) {
-      if (re.test(text)) return type;
+
+    for (
+      const question of QUESTION_TYPES
+    ) {
+
+      if (
+        question.re.test(text)
+      ) {
+        return question.type;
+      }
+
     }
+
     return null;
   }
- 
+
+
+  // ===============================================================
+  // 10. SESSION CONTEXT
+  // ===============================================================
+
+  const session = {
+    taskId: null,
+    stepId: null
+  };
+
+
   function taskListSentence() {
-    return Object.values(taskCache).map((t) => `“${t.title}”`).join(", ");
+
+    return Object.values(
+      taskCache || {}
+    )
+      .map(function (task) {
+        return `“${task.title}”`;
+      })
+      .join(", ");
   }
- 
+
+
   function stepsInOrder(task) {
-    return [...task.steps].sort((a, b) => (a.tier ?? 0) - (b.tier ?? 0));
+
+    return [
+      ...(task.steps || [])
+    ].sort(function (a, b) {
+
+      return (
+        (a.tier ?? 0) -
+        (b.tier ?? 0)
+      );
+
+    });
   }
- 
-  // ---- 4. Reply composition ---------------------------------------------
-  const session = { taskId: null, stepId: null };
- 
-  // ---- Level 1 rule engine entry point -----------------------------------
+
+
+  // ===============================================================
+  // 11. LEVEL 1 FALLBACK RESPONSE
+  // ===============================================================
+
   function ruleBasedReply(rawText) {
-    const text = rawText.trim();
-    if (!text) return "Type a question and I'll do my best — try “what documents do I need for a passport?”";
- 
-    if (GREETING_RE.test(text) && text.length < 20) {
-      return `Hi! I can walk you through: ${taskListSentence()}. What are you trying to get done?`;
+
+    const text =
+      rawText.trim();
+
+    if (!text) {
+
+      return (
+        "Type a question and I'll help you with the available civic tasks."
+      );
     }
-    if (THANKS_RE.test(text)) {
-      return "You're welcome! Anything else — fees, documents, timing, or what comes next?";
+
+
+    if (
+      GREETING_RE.test(text) &&
+      text.length < 25
+    ) {
+
+      return (
+        `Hi! I can help with ${taskListSentence()}. ` +
+        "Ask me about documents, fees, timing, steps, eligibility, or what comes next."
+      );
+
     }
-    if (BYE_RE.test(text)) {
-      return "Good luck with the paperwork — come back anytime you get stuck on a step.";
+
+
+    if (
+      THANKS_RE.test(text)
+    ) {
+
+      return (
+        "You're welcome! You can ask me about fees, documents, timing, eligibility, or the next step."
+      );
+
     }
-    if (HELP_RE.test(text) || LIST_RE.test(text)) {
-      return `I can answer questions about these tasks: ${taskListSentence()}.\n\nAsk me things like:\n• “What documents do I need to register a business?”\n• “How much does a passport cost?”\n• “Where do I go for the driving test?”\n• “What's next after I get my learner's licence?”`;
+
+
+    if (
+      BYE_RE.test(text)
+    ) {
+
+      return (
+        "Good luck with the process! Come back if you get stuck on a step."
+      );
+
     }
- 
-    // A named task always wins first — this avoids a step in the wrong
-    // task's list (e.g. "Apply for a business PAN", inside the business
-    // task) accidentally hijacking a question that's really about the
-    // dedicated "Apply for a PAN card" task. Cross-task step search is
-    // only used as a fallback when no task could be identified at all.
-    const taskHit = matchTask(text);
-    const stepHit = taskHit ? null : matchStepGlobal(text);
- 
-    let task = taskHit || (stepHit && stepHit.task) || (session.taskId && taskCache[session.taskId]);
+
+
+    if (
+      HELP_RE.test(text) ||
+      LIST_RE.test(text)
+    ) {
+
+      return (
+        `I can currently help with: ${taskListSentence()}.\n\n` +
+
+        "Try asking:\n" +
+
+        "• What documents do I need for a passport?\n" +
+
+        "• How much does it cost?\n" +
+
+        "• What comes before GST registration?\n" +
+
+        "• What's next after the learner's licence?"
+      );
+
+    }
+
+
+    const taskHit =
+      matchTask(text);
+
+    const stepHit =
+      taskHit
+        ? null
+        : matchStepGlobal(text);
+
+
+    let task =
+      taskHit ||
+      (stepHit && stepHit.task) ||
+      (
+        session.taskId
+          ? taskCache[session.taskId]
+          : null
+      );
+
+
     if (!task) {
-      return `I didn't catch which task that's about. I can help with: ${taskListSentence()}. Which one do you mean?`;
+
+      return (
+        `I couldn't identify the task. ` +
+        `I can currently help with: ${taskListSentence()}. ` +
+        "Which one do you mean?"
+      );
+
     }
- 
-    // If a *different* task got named this turn, drop any old step context.
-    const taskChanged = session.taskId && session.taskId !== task.id;
-    let step = stepHit
-      ? stepHit.step
-      : (taskHit ? matchStepWithinTask(text, task) : null);
-    if (!step && !taskChanged && session.stepId) {
-      step = task.steps.find((s) => s.id === session.stepId) || null;
+
+
+    const taskChanged =
+      session.taskId &&
+      session.taskId !== task.id;
+
+
+    let step =
+      stepHit
+        ? stepHit.step
+        : (
+            taskHit
+              ? matchStepWithinTask(
+                  text,
+                  task
+                )
+              : null
+          );
+
+
+    if (
+      !step &&
+      !taskChanged &&
+      session.stepId
+    ) {
+
+      step =
+        (task.steps || [])
+          .find(function (item) {
+            return (
+              item.id ===
+              session.stepId
+            );
+          }) || null;
+
     }
- 
-    session.taskId = task.id;
-    session.stepId = step ? step.id : null;
- 
-    const qType = matchQuestionType(text) || "overview";
+
+
+    session.taskId =
+      task.id;
+
+    session.stepId =
+      step
+        ? step.id
+        : null;
+
+
+    const questionType =
+      matchQuestionType(text) ||
+      "overview";
+
+
     return step
-      ? replyForStep(task, step, qType)
-      : replyForTask(task, qType, rawText);
+      ? replyForStep(
+          task,
+          step,
+          questionType
+        )
+      : replyForTask(
+          task,
+          questionType
+        );
   }
- 
-  function replyForStep(task, step, qType) {
-    const head = `${step.title} (${task.title})`;
-    switch (qType) {
+
+
+  // ===============================================================
+  // 12. STEP RESPONSE
+  // ===============================================================
+
+  function replyForStep(
+    task,
+    step,
+    questionType
+  ) {
+
+    switch (questionType) {
+
       case "documents":
-        return step.documentsNeeded && step.documentsNeeded.length
-          ? `Documents needed for “${step.title}”:\n${bulletList(step.documentsNeeded)}`
-          : `No documents are listed for “${step.title}” — it doesn't require paperwork of its own.`;
+
+        if (
+          step.documentsNeeded &&
+          step.documentsNeeded.length
+        ) {
+
+          return (
+            `Documents needed for “${step.title}”:\n` +
+            bulletList(
+              step.documentsNeeded
+            )
+          );
+
+        }
+
+        return (
+          `The dataset does not list specific documents for “${step.title}”.`
+        );
+
+
       case "fee":
-        return `The fee for “${step.title}” is ${step.fee}.`;
+
+        return (
+          `The listed fee for “${step.title}” is ${step.fee}.`
+        );
+
+
       case "time":
-        return `“${step.title}” typically takes ${step.estimatedTime}.`;
+
+        return (
+          `The listed typical time for “${step.title}” is ${step.estimatedTime}.`
+        );
+
+
       case "office":
-        return `“${step.title}” is handled by: ${step.office}.`;
+
+        return (
+          `“${step.title}” is handled by: ${step.office}.`
+        );
+
+
       case "eligibility":
-        return `Eligibility for “${step.title}”: ${step.eligibility}.`;
-      case "count":
-        return `That's a single step, not a set — ask me about the whole “${task.title}” roadmap for the full count.`;
+
+        return (
+          `Eligibility for “${step.title}”: ${step.eligibility}.`
+        );
+
+
       case "next": {
-        const unlocks = task.steps.filter((s) => (s.dependsOn || []).includes(step.id));
-        return unlocks.length
-          ? `After “${step.title}”, you can move on to: ${unlocks.map((s) => `“${s.title}”`).join(", ")}.`
-          : `“${step.title}” doesn't unlock any further steps in this roadmap — it may be one of the last ones, or run in parallel with others.`;
+
+        const nextSteps =
+          (task.steps || [])
+            .filter(function (candidate) {
+
+              return (
+                candidate.dependsOn || []
+              ).includes(step.id);
+
+            });
+
+
+        if (
+          nextSteps.length
+        ) {
+
+          return (
+            `After “${step.title}”, the roadmap lists:\n` +
+
+            nextSteps
+              .map(function (item) {
+                return `• ${item.title}`;
+              })
+              .join("\n")
+          );
+
+        }
+
+
+        return (
+          `The roadmap does not list a step that directly depends on “${step.title}”.`
+        );
       }
-      default:
-        return `${head}\n${step.description}\n\nFee: ${step.fee} · Typical time: ${step.estimatedTime} · Office: ${step.office}\n\nAsk me about documents, eligibility, or what comes after this step.`;
-    }
-  }
- 
-  function replyForTask(task, qType, rawText) {
-    const ordered = stepsInOrder(task);
-    switch (qType) {
-      case "documents": {
-        const withDocs = ordered.filter((s) => s.documentsNeeded && s.documentsNeeded.length);
-        return withDocs.length
-          ? `Documents needed for “${task.title}”, by step:\n${withDocs.map((s) => `• ${s.title}: ${s.documentsNeeded.join(", ")}`).join("\n")}`
-          : `None of the steps in “${task.title}” list specific documents.`;
-      }
-      case "fee":
-        return `Fees for “${task.title}”, by step:\n${ordered.map((s) => `• ${s.title}: ${s.fee}`).join("\n")}`;
-      case "time":
-        return `Typical timing for “${task.title}”, by step:\n${ordered.map((s) => `• ${s.title}: ${s.estimatedTime}`).join("\n")}`;
-      case "office":
-        return `Who handles each step of “${task.title}”:\n${ordered.map((s) => `• ${s.title}: ${s.office}`).join("\n")}`;
-      case "eligibility":
-        return `Eligibility varies by step for “${task.title}”. Ask me about a specific one, e.g. “${ordered[0].title}”.`;
+
+
       case "count":
-        return `“${task.title}” has ${task.steps.length} steps.`;
-      case "next":
-        return `The first step${ordered.filter((s) => (s.tier ?? 0) === 0).length > 1 ? "s are" : " is"}: ${ordered.filter((s) => (s.tier ?? 0) === 0).map((s) => `“${s.title}”`).join(", ")}. Ask “what's next” again once you tell me which step you're on.`;
+
+        return (
+          `“${step.title}” is one step within the “${task.title}” process. ` +
+          `The full roadmap has ${(task.steps || []).length} steps.`
+        );
+
+
       default:
-        return `${task.title}: ${task.summary}\n\nSteps in order:\n${ordered.map((s, i) => `${i + 1}. ${s.title}`).join("\n")}\n\nAsk me about a specific step, or about documents, fees, timing, eligibility, or what's next.`;
+
+        return (
+          `${step.title}\n\n` +
+
+          `${step.description || "No description is listed."}\n\n` +
+
+          `Fee: ${step.fee}\n` +
+
+          `Typical time: ${step.estimatedTime}\n` +
+
+          `Office: ${step.office}\n\n` +
+
+          "You can ask me about its documents, eligibility, fee, timing, or what comes next."
+        );
+
     }
   }
- 
-  function bulletList(items) {
-    return items.map((i) => `• ${i}`).join("\n");
+
+
+  // ===============================================================
+  // 13. TASK RESPONSE
+  // ===============================================================
+
+  function replyForTask(
+    task,
+    questionType
+  ) {
+
+    const ordered =
+      stepsInOrder(task);
+
+
+    switch (questionType) {
+
+      case "documents": {
+
+        const withDocuments =
+          ordered.filter(function (step) {
+
+            return (
+              step.documentsNeeded &&
+              step.documentsNeeded.length
+            );
+
+          });
+
+
+        if (
+          !withDocuments.length
+        ) {
+
+          return (
+            `The dataset does not list specific documents for “${task.title}”.`
+          );
+
+        }
+
+
+        return (
+          `Documents listed for “${task.title}”:\n` +
+
+          withDocuments
+            .map(function (step) {
+
+              return (
+                `• ${step.title}: ` +
+                step.documentsNeeded.join(", ")
+              );
+
+            })
+            .join("\n")
+        );
+
+      }
+
+
+      case "fee":
+
+        return (
+          `Fees listed for “${task.title}”:\n` +
+
+          ordered
+            .map(function (step) {
+
+              return (
+                `• ${step.title}: ${step.fee}`
+              );
+
+            })
+            .join("\n")
+        );
+
+
+      case "time":
+
+        return (
+          `Typical timing listed for “${task.title}”:\n` +
+
+          ordered
+            .map(function (step) {
+
+              return (
+                `• ${step.title}: ${step.estimatedTime}`
+              );
+
+            })
+            .join("\n")
+        );
+
+
+      case "office":
+
+        return (
+          `Offices/departments listed for “${task.title}”:\n` +
+
+          ordered
+            .map(function (step) {
+
+              return (
+                `• ${step.title}: ${step.office}`
+              );
+
+            })
+            .join("\n")
+        );
+
+
+      case "eligibility":
+
+        return (
+          `The eligibility information varies by step. ` +
+          `Ask me about a specific step in “${task.title}”.`
+        );
+
+
+      case "count":
+
+        return (
+          `“${task.title}” has ${(task.steps || []).length} steps in the loaded roadmap.`
+        );
+
+
+      case "next": {
+
+        const firstSteps =
+          ordered.filter(function (step) {
+
+            return (
+              (step.tier ?? 0) === 0
+            );
+
+          });
+
+
+        if (!firstSteps.length) {
+
+          return (
+            `The roadmap does not specify a first step for “${task.title}”.`
+          );
+
+        }
+
+
+        return (
+          `The first step${firstSteps.length > 1 ? "s are" : " is"}:\n` +
+
+          firstSteps
+            .map(function (step) {
+              return `• ${step.title}`;
+            })
+            .join("\n")
+        );
+
+      }
+
+
+      default:
+
+        return (
+          `${task.title}\n\n` +
+
+          `${task.summary || "No summary is listed."}\n\n` +
+
+          "Steps:\n" +
+
+          ordered
+            .map(function (step, index) {
+
+              return (
+                `${index + 1}. ${step.title}`
+              );
+
+            })
+            .join("\n") +
+
+          "\n\nYou can ask me about documents, fees, timing, eligibility, offices, or what comes next."
+        );
+    }
   }
- 
-  function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str;
+
+
+  function bulletList(items) {
+
+    return items
+      .map(function (item) {
+        return `• ${item}`;
+      })
+      .join("\n");
+  }
+
+
+  // ===============================================================
+  // 14. HTML SAFETY
+  // ===============================================================
+
+  function escapeHtml(text) {
+
+    const div =
+      document.createElement("div");
+
+    div.textContent =
+      text || "";
+
     return div.innerHTML;
   }
- 
-  // Turn "\n" separated plain text + our "•" bullets into safe HTML.
+
+
   function formatMessage(text) {
+
     return escapeHtml(text)
       .split("\n")
-      .map((line) => (line.startsWith("• ") ? `<span class="cb-bullet">${line}</span>` : line))
+      .map(function (line) {
+
+        if (
+          line.startsWith("• ")
+        ) {
+
+          return (
+            `<span class="cb-bullet">${line}</span>`
+          );
+
+        }
+
+        return line;
+
+      })
       .join("<br>");
   }
- 
-  // ---- Level 2: LLM backend -------------------------------------------
-  // Posts to backend/routes/chat.js, which holds the API key server-side
-  // and grounds the model in the real task JSON. `history` is the rolling
-  // transcript tracked above, sent so follow-ups ("how much does that
-  // cost?") resolve correctly. Any failure (network error, 501 because
-  // ANTHROPIC_API_KEY isn't set, etc.) throws, and getReply() below falls
-  // back to the Level 1 rule engine — so this is always safe to leave on.
-  async function callLlmBackend(rawText) {
-    const res = await fetch(`${API.baseUrl}${CONFIG.llmEndpoint}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: rawText, history })
-    });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error || `Chat backend returned ${res.status}`);
-    if (!body.reply) throw new Error("Chat backend returned no reply");
-    return body.reply;
+
+
+  // ===============================================================
+  // 15. LOCATION
+  // ===============================================================
+
+  function getLocation() {
+
+    return {
+
+      state:
+        document
+          .querySelector("#state-input")
+          ?.value
+          ?.trim() || "",
+
+      city:
+        document
+          .querySelector("#city-input")
+          ?.value
+          ?.trim() || ""
+
+    };
   }
- 
-  // Single entry point the widget calls. Whichever mode is configured,
-  // this always resolves to a string reply, falling back to the rule
-  // engine if the LLM path isn't set up yet or a request fails — so
-  // flipping CONFIG.mode back and forth is always safe.
-  async function getReply(rawText) {
-    await loadAllTasks();
-    pushHistory("user", rawText);
-    let reply;
-    if (CONFIG.mode === "llm") {
-      try {
-        reply = await callLlmBackend(rawText);
-      } catch (err) {
-        reply = ruleBasedReply(rawText);
-      }
-    } else {
-      reply = ruleBasedReply(rawText);
+
+
+  // ===============================================================
+  // 16. LEVEL 2 — CALL BACKEND
+  // ===============================================================
+
+  async function callLlmBackend(
+    rawText
+  ) {
+
+    const location =
+      getLocation();
+
+
+    const baseUrl =
+      typeof API !== "undefined" &&
+      API.baseUrl
+        ? API.baseUrl
+        : "";
+
+
+    const response =
+      await fetch(
+        `${baseUrl}${CONFIG.llmEndpoint}`,
+        {
+
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body: JSON.stringify({
+
+            message:
+              rawText,
+
+            history:
+              history.slice(
+                -CONFIG.maxHistory
+              ),
+
+            location
+
+          })
+
+        }
+      );
+
+
+    let body;
+
+    try {
+
+      body =
+        await response.json();
+
+    } catch (error) {
+
+      throw new Error(
+        "The chatbot server returned an invalid response."
+      );
+
     }
-    pushHistory("bot", reply);
-    return reply;
+
+
+    if (!response.ok) {
+
+      throw new Error(
+        body?.error ||
+        `Chat backend returned ${response.status}`
+      );
+
+    }
+
+
+    if (
+      !body ||
+      !body.reply
+    ) {
+
+      throw new Error(
+        "The chatbot backend returned no reply."
+      );
+
+    }
+
+
+    return {
+
+      text:
+        body.reply,
+
+      sources:
+        Array.isArray(
+          body.sources
+        )
+          ? body.sources
+          : []
+
+    };
   }
- 
-  // ---- 5. Widget UI -------------------------------------------------------
+
+
+  // ===============================================================
+  // 17. MAIN GET REPLY
+  // ===============================================================
+
+  async function getReply(
+    rawText
+  ) {
+
+    await loadAllTasks();
+
+
+    pushHistory(
+      "user",
+      rawText
+    );
+
+
+    let result;
+
+
+    if (
+      CONFIG.mode === "llm"
+    ) {
+
+      try {
+
+        result =
+          await callLlmBackend(
+            rawText
+          );
+
+      } catch (error) {
+
+        console.warn(
+          "LLM chatbot unavailable. Falling back to rule engine.",
+          error
+        );
+
+
+        if (
+          !CONFIG.fallbackOnError
+        ) {
+
+          throw error;
+
+        }
+
+
+        result = {
+
+          text:
+            ruleBasedReply(
+              rawText
+            ),
+
+          sources: []
+
+        };
+
+      }
+
+    } else {
+
+      result = {
+
+        text:
+          ruleBasedReply(
+            rawText
+          ),
+
+        sources: []
+
+      };
+
+    }
+
+
+    pushHistory(
+      "bot",
+      result.text
+    );
+
+
+    return result;
+  }
+
+
+  // ===============================================================
+  // 18. CHAT SUGGESTIONS
+  // ===============================================================
+
   const SUGGESTIONS = [
+
     "What documents do I need for a passport?",
+
     "How much does registering a business cost?",
-    "What's next after the learner's licence test?"
+
+    "What's next after the learner's licence?",
+
+    "How do I apply for PAN?"
+
   ];
- 
+
+
+  // ===============================================================
+  // 19. CHAT WIDGET
+  // ===============================================================
+
   function buildWidget() {
-    const root = document.createElement("div");
-    root.id = "cb-root";
+
+    const existing =
+      document.querySelector(
+        "#cb-root"
+      );
+
+    if (existing) {
+      existing.remove();
+    }
+
+
+    const root =
+      document.createElement("div");
+
+    root.id =
+      "cb-root";
+
+
     root.innerHTML = `
-      <button id="cb-toggle" class="cb-toggle" aria-label="Open task assistant">
+
+      <button
+        id="cb-toggle"
+        class="cb-toggle"
+        aria-label="Open task assistant"
+        aria-expanded="false"
+      >
         <span class="cb-toggle-icon">💬</span>
       </button>
-      <div id="cb-panel" class="cb-panel" hidden>
+
+
+      <div
+        id="cb-panel"
+        class="cb-panel"
+        hidden
+      >
+
         <div class="cb-header">
+
           <div>
-            <p class="cb-header-title">Task Assistant</p>
-            <p class="cb-header-sub">${
-              CONFIG.mode === "llm"
-                ? "AI-powered · grounded in the loaded tasks"
-                : "Rule-based · answers from the 4 loaded tasks"
-            }</p>
+
+            <p class="cb-header-title">
+              Task Assistant
+            </p>
+
+            <p class="cb-header-sub">
+              AI-powered · grounded in the loaded tasks
+            </p>
+
           </div>
-          <button id="cb-close" class="cb-close" aria-label="Close">×</button>
+
+
+          <button
+            id="cb-close"
+            class="cb-close"
+            aria-label="Close"
+          >
+            ×
+          </button>
+
         </div>
-        <div id="cb-messages" class="cb-messages"></div>
-        <div id="cb-suggestions" class="cb-suggestions"></div>
-        <form id="cb-form" class="cb-form">
-          <input id="cb-input" class="cb-input" type="text" autocomplete="off"
-            placeholder="Ask about fees, documents, timing…" />
-          <button type="submit" class="cb-send" aria-label="Send">➤</button>
+
+
+        <div
+          id="cb-messages"
+          class="cb-messages"
+        ></div>
+
+
+        <div
+          id="cb-suggestions"
+          class="cb-suggestions"
+        ></div>
+
+
+        <form
+          id="cb-form"
+          class="cb-form"
+        >
+
+          <input
+            id="cb-input"
+            class="cb-input"
+            type="text"
+            autocomplete="off"
+            placeholder="Ask about fees, documents, timing…"
+          />
+
+
+          <button
+            type="submit"
+            class="cb-send"
+            aria-label="Send"
+          >
+            ➤
+          </button>
+
         </form>
+
       </div>
     `;
-    document.body.appendChild(root);
- 
-    const toggleBtn = root.querySelector("#cb-toggle");
-    const closeBtn = root.querySelector("#cb-close");
-    const panel = root.querySelector("#cb-panel");
-    const messages = root.querySelector("#cb-messages");
-    const suggestionsEl = root.querySelector("#cb-suggestions");
-    const form = root.querySelector("#cb-form");
-    const input = root.querySelector("#cb-input");
- 
+
+
+    document.body.appendChild(
+      root
+    );
+
+
+    const toggleButton =
+      root.querySelector(
+        "#cb-toggle"
+      );
+
+    const closeButton =
+      root.querySelector(
+        "#cb-close"
+      );
+
+    const panel =
+      root.querySelector(
+        "#cb-panel"
+      );
+
+    const messages =
+      root.querySelector(
+        "#cb-messages"
+      );
+
+    const suggestions =
+      root.querySelector(
+        "#cb-suggestions"
+      );
+
+    const form =
+      root.querySelector(
+        "#cb-form"
+      );
+
+    const input =
+      root.querySelector(
+        "#cb-input"
+      );
+
+
     let opened = false;
- 
-    function addMessage(text, who) {
-      const bubble = document.createElement("div");
-      bubble.className = `cb-msg cb-msg-${who}`;
-      bubble.innerHTML = formatMessage(text);
-      messages.appendChild(bubble);
-      messages.scrollTop = messages.scrollHeight;
+
+
+    // =============================================================
+    // ADD MESSAGE
+    // =============================================================
+
+    function addMessage(
+      text,
+      who,
+      sources = []
+    ) {
+
+      const bubble =
+        document.createElement(
+          "div"
+        );
+
+
+      bubble.className =
+        `cb-msg cb-msg-${who}`;
+
+
+      bubble.innerHTML =
+        formatMessage(text);
+
+
+      // -----------------------------------------------------------
+      // Official sources
+      // -----------------------------------------------------------
+
+      const safeSources =
+        Array.isArray(sources)
+          ? sources.filter(
+              function (source) {
+
+                return (
+                  source &&
+                  /^https?:\/\//i.test(
+                    source.url || ""
+                  )
+                );
+
+              }
+            )
+          : [];
+
+
+      if (
+        safeSources.length
+      ) {
+
+        const sourceBox =
+          document.createElement(
+            "div"
+          );
+
+
+        sourceBox.className =
+          "cb-sources";
+
+
+        const sourceLabel =
+          document.createElement(
+            "div"
+          );
+
+
+        sourceLabel.className =
+          "cb-source-label";
+
+
+        sourceLabel.textContent =
+          "Official source";
+
+
+        sourceBox.appendChild(
+          sourceLabel
+        );
+
+
+        safeSources.forEach(
+          function (source) {
+
+            const link =
+              document.createElement(
+                "a"
+              );
+
+
+            link.className =
+              "cb-source-link";
+
+
+            link.href =
+              source.url;
+
+
+            link.target =
+              "_blank";
+
+
+            link.rel =
+              "noopener noreferrer";
+
+
+            link.textContent =
+              source.title ||
+              "Open official source";
+
+
+            sourceBox.appendChild(
+              link
+            );
+
+          }
+        );
+
+
+        bubble.appendChild(
+          sourceBox
+        );
+
+      }
+
+
+      messages.appendChild(
+        bubble
+      );
+
+
+      messages.scrollTop =
+        messages.scrollHeight;
     }
- 
+
+
+    // =============================================================
+    // TYPING INDICATOR
+    // =============================================================
+
     function addTyping() {
-      const bubble = document.createElement("div");
-      bubble.className = "cb-msg cb-msg-bot cb-typing";
-      bubble.id = "cb-typing";
-      bubble.innerHTML = "<span></span><span></span><span></span>";
-      messages.appendChild(bubble);
-      messages.scrollTop = messages.scrollHeight;
+
+      removeTyping();
+
+
+      const bubble =
+        document.createElement(
+          "div"
+        );
+
+
+      bubble.className =
+        "cb-msg cb-msg-bot cb-typing";
+
+
+      bubble.id =
+        "cb-typing";
+
+
+      bubble.innerHTML =
+        `
+          <span></span>
+          <span></span>
+          <span></span>
+        `;
+
+
+      messages.appendChild(
+        bubble
+      );
+
+
+      messages.scrollTop =
+        messages.scrollHeight;
     }
- 
+
+
     function removeTyping() {
-      const el = document.getElementById("cb-typing");
-      if (el) el.remove();
-    }
- 
-    function renderSuggestions(list) {
-      suggestionsEl.innerHTML = "";
-      list.forEach((s) => {
-        const chip = document.createElement("button");
-        chip.type = "button";
-        chip.className = "cb-chip";
-        chip.textContent = s;
-        chip.addEventListener("click", () => handleUserText(s));
-        suggestionsEl.appendChild(chip);
-      });
-    }
- 
-    async function handleUserText(text) {
-      addMessage(text, "user");
-      input.value = "";
-      suggestionsEl.innerHTML = "";
-      addTyping();
-      try {
-        // Tiny artificial delay so the typing indicator reads as real,
-        // not just a flash — the rule engine resolves instantly; an
-        // LLM call in Level 2 will have real latency here anyway.
-        const [reply] = await Promise.all([
-          getReply(text),
-          new Promise((r) => setTimeout(r, 250))
-        ]);
-        removeTyping();
-        addMessage(reply, "bot");
-      } catch (err) {
-        removeTyping();
-        addMessage(`Couldn't load task data (${err.message}). Try reloading the page.`, "bot");
+
+      const typing =
+        document.querySelector(
+          "#cb-typing"
+        );
+
+
+      if (typing) {
+        typing.remove();
       }
     }
- 
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const text = input.value.trim();
-      if (text) handleUserText(text);
-    });
- 
-    toggleBtn.addEventListener("click", () => {
-      opened = !opened;
-      panel.hidden = !opened;
-      toggleBtn.setAttribute("aria-expanded", String(opened));
-      if (opened && !messages.childElementCount) {
+
+
+    // =============================================================
+    // SUGGESTION CHIPS
+    // =============================================================
+
+    function renderSuggestions(
+      list
+    ) {
+
+      suggestions.innerHTML =
+        "";
+
+
+      list.forEach(
+        function (suggestion) {
+
+          const button =
+            document.createElement(
+              "button"
+            );
+
+
+          button.type =
+            "button";
+
+
+          button.className =
+            "cb-chip";
+
+
+          button.textContent =
+            suggestion;
+
+
+          button.addEventListener(
+            "click",
+            function () {
+
+              handleUserText(
+                suggestion
+              );
+
+            }
+          );
+
+
+          suggestions.appendChild(
+            button
+          );
+
+        }
+      );
+    }
+
+
+    // =============================================================
+    // SEND MESSAGE
+    // =============================================================
+
+    async function handleUserText(
+      text
+    ) {
+
+      const cleanText =
+        String(text || "").trim();
+
+
+      if (!cleanText) {
+        return;
+      }
+
+
+      addMessage(
+        cleanText,
+        "user"
+      );
+
+
+      input.value =
+        "";
+
+
+      suggestions.innerHTML =
+        "";
+
+
+      input.disabled =
+        true;
+
+
+      addTyping();
+
+
+      try {
+
+        const results =
+          await Promise.all([
+
+            getReply(
+              cleanText
+            ),
+
+            new Promise(
+              function (resolve) {
+
+                setTimeout(
+                  resolve,
+                  250
+                );
+
+              }
+            )
+
+          ]);
+
+
+        const result =
+          results[0];
+
+
+        removeTyping();
+
+
         addMessage(
-          "Hi! What are you trying to get done — registering a business, a passport, a PAN card, or a driving licence?",
+          result.text,
+          "bot",
+          result.sources
+        );
+
+
+      } catch (error) {
+
+        console.error(
+          "Chatbot error:",
+          error
+        );
+
+
+        removeTyping();
+
+
+        addMessage(
+          "Couldn't load the task assistant right now. Please make sure the backend server is running and try again.",
           "bot"
         );
-        renderSuggestions(SUGGESTIONS);
+
+      } finally {
+
+        input.disabled =
+          false;
+
         input.focus();
+
       }
-    });
- 
-    closeBtn.addEventListener("click", () => {
-      opened = false;
-      panel.hidden = true;
-      toggleBtn.setAttribute("aria-expanded", "false");
-    });
+    }
+
+
+    // =============================================================
+    // OPEN / CLOSE
+    // =============================================================
+
+    toggleButton.addEventListener(
+      "click",
+      function () {
+
+        opened =
+          !opened;
+
+
+        panel.hidden =
+          !opened;
+
+
+        toggleButton.setAttribute(
+          "aria-expanded",
+          String(opened)
+        );
+
+
+        if (
+          opened &&
+          !messages.childElementCount
+        ) {
+
+          addMessage(
+
+            "Hi! What are you trying to get done — registering a business, a passport, a PAN card, or a driving licence?",
+
+            "bot"
+
+          );
+
+
+          renderSuggestions(
+            SUGGESTIONS
+          );
+
+
+          input.focus();
+
+        }
+
+      }
+    );
+
+
+    closeButton.addEventListener(
+      "click",
+      function () {
+
+        opened =
+          false;
+
+
+        panel.hidden =
+          true;
+
+
+        toggleButton.setAttribute(
+          "aria-expanded",
+          "false"
+        );
+
+      }
+    );
+
+
+    // =============================================================
+    // FORM SUBMIT
+    // =============================================================
+
+    form.addEventListener(
+      "submit",
+      function (event) {
+
+        event.preventDefault();
+
+
+        const text =
+          input.value.trim();
+
+
+        if (text) {
+
+          handleUserText(
+            text
+          );
+
+        }
+
+      }
+    );
+
+
+    // =============================================================
+    // ENTER KEY
+    // =============================================================
+
+    input.addEventListener(
+      "keydown",
+      function (event) {
+
+        if (
+          event.key === "Enter" &&
+          !event.shiftKey
+        ) {
+
+          event.preventDefault();
+
+
+          const text =
+            input.value.trim();
+
+
+          if (text) {
+
+            handleUserText(
+              text
+            );
+
+          }
+
+        }
+
+      }
+    );
+
   }
- 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", buildWidget);
+
+
+  // ===============================================================
+  // 20. INITIALIZE
+  // ===============================================================
+
+  function initialize() {
+
+    try {
+
+      buildWidget();
+
+    } catch (error) {
+
+      console.error(
+        "Failed to initialize chatbot:",
+        error
+      );
+
+    }
+
+  }
+
+
+  if (
+    document.readyState ===
+    "loading"
+  ) {
+
+    document.addEventListener(
+      "DOMContentLoaded",
+      initialize
+    );
+
   } else {
-    buildWidget();
+
+    initialize();
+
   }
- 
-  // Small public surface — lets a future backend-integration script (or
-  // a console/test session) drive the bot without the floating widget.
+
+
+  // ===============================================================
+  // 21. PUBLIC TESTING API
+  // ===============================================================
+
   window.ChatBot = {
+
     getReply,
-    resetSession: () => { session.taskId = null; session.stepId = null; history.length = 0; }
+
+    resetSession: function () {
+
+      session.taskId =
+        null;
+
+      session.stepId =
+        null;
+
+      history.length =
+        0;
+
+    },
+
+    getHistory: function () {
+
+      return [
+        ...history
+      ];
+
+    }
+
   };
+
 })();
- 

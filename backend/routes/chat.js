@@ -7,128 +7,318 @@ const DATA_PATH = path.join(__dirname, "..", "data", "tasks.json");
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
-// Cheap + fast model — plenty for a grounded FAQ bot over ~4 small tasks.
-// Override with ANTHROPIC_MODEL in backend/.env if you want a bigger model.
-const MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001";
-const MAX_HISTORY_TURNS = 12; // mirrors frontend/js/chatbot.js's MAX_HISTORY
+const MODEL =
+  process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001";
+
+const MAX_HISTORY_TURNS = 12;
+
+const TASK_ALIASES = {
+  "register-small-business-in": [
+    "business",
+    "small business",
+    "company",
+    "startup",
+    "shop",
+    "enterprise",
+    "msme",
+    "udyam",
+    "incorporate",
+    "incorporation",
+    "llp",
+    "pvt ltd",
+    "private limited",
+    "proprietorship",
+    "gst",
+    "trade license",
+    "trade licence",
+  ],
+
+  "apply-passport-in": [
+    "passport",
+    "travel document",
+    "psk",
+    "passport seva",
+    "renew passport",
+    "renew my passport",
+    "apply for a passport",
+  ],
+
+  "apply-pan-in": [
+    "pan",
+    "pan card",
+    "permanent account number",
+    "tax id",
+    "income tax pan",
+  ],
+
+  "apply-driving-license-in": [
+    "driving licence",
+    "driving license",
+    "driver's license",
+    "drivers license",
+    "learner's licence",
+    "learners licence",
+    "learner licence",
+    "learner's license",
+    "rto",
+    "driving test",
+  ],
+};
 
 function loadTasks() {
   return JSON.parse(fs.readFileSync(DATA_PATH, "utf-8"));
 }
 
-// Grounding is just "hand the model the real data and tell it not to
-// improvise" — the whole dataset is ~16KB (4 tasks), so there's no need to
-// pre-select a subset the way the Level 1 rule engine has to.
-function buildSystemPrompt(tasks) {
+function findRelevantTasks(message, tasks) {
+  const text = message.toLowerCase();
+
+  const scored = tasks.map((task) => {
+    let score = 0;
+
+    for (const alias of TASK_ALIASES[task.id] || []) {
+      if (text.includes(alias)) {
+        score += alias.length > 5 ? 2 : 1;
+      }
+    }
+
+    if (text.includes(task.title.toLowerCase())) {
+      score += 3;
+    }
+
+    return { task, score };
+  });
+
+  const hits = scored
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return hits.length
+    ? hits.slice(0, 2).map((x) => x.task)
+    : tasks;
+}
+
+function buildSystemPrompt(allTasks, relevantTasks, location) {
+  const locationLine =
+    location && (location.state || location.city)
+      ? `The user entered this location for context: ${
+          location.city || ""
+        }${location.city && location.state ? ", " : ""}${
+          location.state || ""
+        }. Do not invent location-specific rules; use the task data only.`
+      : "No user location was provided.";
+
   return [
-    "You are the chat assistant on a civic-task website that walks users",
-    "through Indian government procedures: registering a small business,",
-    "applying for a passport, applying for a PAN card, and applying for a",
-    "driving licence.",
+    "You are the Task Assistant for a civic-task website covering a small, fixed dataset of Indian government procedures.",
     "",
-    "Answer ONLY from the TASK DATA JSON below — it is the single source of",
-    "truth for steps, fees, documents, offices, timing, and eligibility.",
-    "Never invent a fee, document, office, or URL that isn't in the data.",
-    "If someone asks about something the data doesn't cover (a task that",
-    "isn't listed, or a detail a step doesn't have), say so plainly and, if a",
-    "relevant step has a sourceUrl, point them to it instead of guessing.",
+
+    "GROUNDING RULES — STRICT:",
+
+    "1. Answer only from the supplied TASK DATA. It is the source of truth for this demo.",
+
+    "2. Never invent or estimate a fee, processing time, document, eligibility rule, office, prerequisite, or URL.",
+
+    "3. If the requested detail is not present in the data, say that the demo does not list that detail. Do not fill the gap from general knowledge.",
+
+    "4. If the user asks about a task that is not in the dataset, say which tasks are supported and ask which one they mean.",
+
+    "5. Use dependsOn to answer prerequisite / previous-step / next-step questions. Do not claim that two steps are sequential unless the data shows that dependency.",
+
+    "6. Distinguish a task from a step. If a question names a step such as GST registration, answer that step inside the business roadmap unless the user clearly asks for the separate PAN task.",
+
+    "7. For follow-up questions such as 'how much is that?' use the conversation history to resolve the current task/step.",
+
+    "8. Do not give personalized legal, tax, financial, or immigration advice. You can report what this demo's data says.",
+
+    "9. Keep answers concise and useful. For lists, use plain '-' bullets. Do not use markdown tables or headings.",
+
+    "10. Do not print raw URLs. When an official source is available, say 'Official source available below.' The frontend will render the verified source link separately.",
+
     "",
-    "Keep replies short and conversational — a few sentences, or a short",
-    "plain-text bullet list (using \"- \") for multi-part answers like a list",
-    "of documents. No markdown headers or bold. Refer to tasks and steps by",
-    "their titles, not their internal ids. Use the conversation history to",
-    "resolve follow-ups like \"how much does that cost?\".",
+
+    locationLine,
+
     "",
-    "Talk like a knowledgeable person, not a menu. Understand typos, slang,",
-    "abbreviations (e.g. \"DL\", \"biz\", \"PAN\") and indirect phrasing — never",
-    "require the user's wording to match a task or step title exactly. Don't",
-    "open by listing what you can do unless the user asks what you can help",
-    "with, or their request is genuinely unrelated to all four tasks (e.g.",
-    "they ask about a task not in the data) — even then, say what you don't",
-    "cover briefly and move on rather than reciting the full task list.",
-    "Small talk (greetings, thanks) gets a brief, warm, natural reply — not a",
-    "capability list.",
+
+    "RELEVANT TASK DATA:",
+    JSON.stringify(relevantTasks),
+
     "",
-    "TASK DATA (JSON):",
-    JSON.stringify(tasks),
+
+    "FULL TASK CATALOG (use this only to resolve an ambiguous task name or tell the user what is supported):",
+    JSON.stringify(
+      allTasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        summary: t.summary,
+      }))
+    ),
   ].join("\n");
 }
 
-/**
- * POST /api/chat — Level 2: LLM-backed chatbot.
- *
- * frontend/js/chatbot.js calls this whenever CONFIG.mode is "llm", and
- * falls back to its own rule engine if this errors — so it's safe to leave
- * ANTHROPIC_API_KEY unset (this just returns 501) or to have this route
- * fail transiently.
- *
- * Request body:  { message: string, history?: [{ role: "user"|"bot", text: string }] }
- * Response body: { reply: string }
- */
 router.post("/", async (req, res) => {
   try {
     const apiKey = process.env.ANTHROPIC_API_KEY;
+
     if (!apiKey) {
       return res.status(501).json({
         error:
-          "ANTHROPIC_API_KEY is not set. Copy backend/.env.example to backend/.env " +
-          "and add your key to enable the LLM chatbot.",
+          "ANTHROPIC_API_KEY is not set. Copy backend/.env.example to backend/.env and add your key to enable the LLM chatbot.",
       });
     }
 
-    const { message, history } = req.body || {};
-    if (!message || typeof message !== "string" || !message.trim()) {
-      return res.status(400).json({ error: "Request body must include a non-empty 'message' string." });
+    const { message, history, location } = req.body || {};
+
+    if (
+      !message ||
+      typeof message !== "string" ||
+      !message.trim()
+    ) {
+      return res.status(400).json({
+        error:
+          "Request body must include a non-empty 'message' string.",
+      });
     }
 
-    // The frontend's history uses {role: "user"|"bot", text}; the Anthropic
-    // API wants {role: "user"|"assistant", content}.
-    const priorTurns = (Array.isArray(history) ? history : [])
-      .filter((h) => h && typeof h.text === "string" && (h.role === "user" || h.role === "bot"))
+    const allTasks = loadTasks();
+
+    const relevantTasks = findRelevantTasks(
+      message,
+      allTasks
+    );
+
+    const priorTurns = (
+      Array.isArray(history) ? history : []
+    )
+      .filter(
+        (h) =>
+          h &&
+          typeof h.text === "string" &&
+          (h.role === "user" || h.role === "bot")
+      )
       .slice(-MAX_HISTORY_TURNS)
-      .map((h) => ({ role: h.role === "bot" ? "assistant" : "user", content: h.text }));
+      .map((h) => ({
+        role:
+          h.role === "bot" ? "assistant" : "user",
+        content: h.text.slice(0, 2000),
+      }));
 
-    const messages = [...priorTurns, { role: "user", content: message }];
-
-    const tasks = loadTasks();
-
-    const response = await fetch(ANTHROPIC_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": ANTHROPIC_VERSION,
+    const messages = [
+      ...priorTurns,
+      {
+        role: "user",
+        content: message.trim(),
       },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 500,
-        system: buildSystemPrompt(tasks),
-        messages,
-      }),
-    });
+    ];
+
+    const response = await fetch(
+      ANTHROPIC_URL,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": ANTHROPIC_VERSION,
+        },
+
+        body: JSON.stringify({
+          model: MODEL,
+
+          max_tokens: 600,
+
+          system: buildSystemPrompt(
+            allTasks,
+            relevantTasks,
+            location
+          ),
+
+          messages,
+        }),
+      }
+    );
 
     if (!response.ok) {
       const errBody = await response.text();
-      console.error("Anthropic API error:", response.status, errBody);
-      return res.status(502).json({ error: "The LLM backend request failed." });
+
+      console.error(
+        "Anthropic API error:",
+        response.status,
+        errBody
+      );
+
+      return res.status(502).json({
+        error: "The LLM backend request failed.",
+      });
     }
 
     const data = await response.json();
+
     const reply = (data.content || [])
-      .filter((block) => block.type === "text")
+      .filter(
+        (block) => block.type === "text"
+      )
       .map((block) => block.text)
       .join("\n")
       .trim();
 
     if (!reply) {
-      return res.status(502).json({ error: "The LLM backend returned an empty reply." });
+      return res.status(502).json({
+        error:
+          "The LLM backend returned an empty reply.",
+      });
     }
 
-    res.json({ reply });
+    const sources = [
+      ...new Map(
+        relevantTasks
+          .flatMap(
+            (task) => task.steps || []
+          )
+          .filter((step) =>
+            /^https?:\/\//i.test(
+              step.sourceUrl || ""
+            )
+          )
+          .map((step) => [
+            step.sourceUrl,
+            {
+              title: taskTitleForSource(
+                relevantTasks,
+                step
+              ),
+              url: step.sourceUrl,
+            },
+          ])
+      ).values(),
+    ];
+
+    res.json({
+      reply,
+      sources,
+    });
   } catch (err) {
-    console.error("POST /api/chat error:", err);
-    res.status(500).json({ error: "Unexpected error handling chat request." });
+    console.error(
+      "POST /api/chat error:",
+      err
+    );
+
+    res.status(500).json({
+      error:
+        "Unexpected error handling chat request.",
+    });
   }
 });
+
+function taskTitleForSource(tasks, step) {
+  const owner = tasks.find((task) =>
+    (task.steps || []).some(
+      (s) => s.id === step.id
+    )
+  );
+
+  return owner
+    ? owner.title
+    : "Official source";
+}
 
 module.exports = router;

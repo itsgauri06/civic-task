@@ -1,227 +1,651 @@
 /* =========================================================
-   TASK ASSISTANT — rule-based chatbot widget
-   Reuses the design tokens defined in main.css (:root).
+   CIVIC TASK ASSISTANT
    ========================================================= */
 
 #cb-root {
+  --cb-primary: #2563eb;
+  --cb-primary-dark: #1d4ed8;
+  --cb-bg: #ffffff;
+  --cb-border: #e5e7eb;
+  --cb-text: #111827;
+  --cb-muted: #6b7280;
+  --cb-user-bg: #2563eb;
+  --cb-bot-bg: #f3f4f6;
+  --cb-shadow: 0 18px 45px rgba(0, 0, 0, 0.16);
+
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+
   position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 1000;
-  font-family: var(--font-body, sans-serif);
+  right: 24px;
+  bottom: 24px;
+  z-index: 9999;
+
+  box-sizing: border-box;
 }
 
+#cb-root *,
+#cb-root *::before,
+#cb-root *::after {
+  box-sizing: border-box;
+}
+
+
+/* =========================================================
+   FLOATING BUTTON
+   ========================================================= */
+
 .cb-toggle {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
+  width: 58px;
+  height: 58px;
+
   border: none;
-  background: var(--seal, #4f46e5);
-  color: #fff;
-  font-size: 22px;
-  cursor: pointer;
-  box-shadow: var(--shadow-lg, 0 18px 45px rgba(31, 41, 75, 0.13));
+  border-radius: 50%;
+
+  background: var(--cb-primary);
+  color: #ffffff;
+
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.15s ease, background 0.15s ease;
+
+  cursor: pointer;
+
+  box-shadow:
+    0 8px 24px rgba(37, 99, 235, 0.35);
+
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .cb-toggle:hover {
-  transform: scale(1.06);
-  background: var(--seal-dark, #3730a3);
+  background: var(--cb-primary-dark);
+
+  transform: translateY(-2px);
+
+  box-shadow:
+    0 12px 28px rgba(37, 99, 235, 0.4);
 }
+
+.cb-toggle:active {
+  transform: scale(0.96);
+}
+
+.cb-toggle-icon {
+  font-size: 25px;
+  line-height: 1;
+}
+
+
+/* =========================================================
+   CHAT PANEL
+   ========================================================= */
 
 .cb-panel {
+  width: 390px;
+  height: 560px;
+
   position: absolute;
   right: 0;
-  bottom: 68px;
-  width: 340px;
-  max-width: calc(100vw - 32px);
-  height: 460px;
-  max-height: calc(100vh - 120px);
-  background: var(--paper-raised, #fff);
-  border: 1px solid var(--line, #e5e8f2);
-  border-radius: var(--radius-lg, 18px);
-  box-shadow: var(--shadow-lg, 0 18px 45px rgba(31, 41, 75, 0.13));
+  bottom: 72px;
+
+  background: var(--cb-bg);
+
+  border: 1px solid var(--cb-border);
+  border-radius: 18px;
+
+  box-shadow: var(--cb-shadow);
+
+  overflow: hidden;
+
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+
+  animation: cb-slide-up 0.2s ease;
 }
 
-/* Without this, the browser's default [hidden] { display: none } loses to
-   the .cb-panel { display: flex } rule above (same specificity, author
-   stylesheet wins) — so setting panel.hidden = true in JS silently does
-   nothing and the close (×) button and toggle both appear broken. */
-.cb-panel[hidden] {
-  display: none;
+@keyframes cb-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
+
+
+/* =========================================================
+   HEADER
+   ========================================================= */
 
 .cb-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  min-height: 70px;
+
   padding: 14px 16px;
-  background: var(--seal-soft, #eef0ff);
-  border-bottom: 1px solid var(--line, #e5e8f2);
+
+  background: var(--cb-primary);
+  color: #ffffff;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  flex-shrink: 0;
 }
 
 .cb-header-title {
   margin: 0;
-  font-family: var(--font-display, serif);
-  font-weight: 600;
-  font-size: 15px;
-  color: var(--ink, #17213d);
+
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
 }
 
 .cb-header-sub {
-  margin: 2px 0 0;
+  margin: 3px 0 0;
+
   font-size: 11px;
-  color: var(--ink-muted, #929bb0);
+  line-height: 1.4;
+
+  opacity: 0.85;
 }
 
 .cb-close {
+  width: 32px;
+  height: 32px;
+
   border: none;
-  background: none;
-  font-size: 20px;
+  border-radius: 8px;
+
+  background: transparent;
+  color: #ffffff;
+
+  font-size: 25px;
   line-height: 1;
-  color: var(--ink-soft, #68728b);
+
   cursor: pointer;
-  padding: 0 2px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  transition:
+    background 0.15s ease;
 }
 
 .cb-close:hover {
-  color: var(--ink, #17213d);
+  background: rgba(255, 255, 255, 0.14);
 }
+
+
+/* =========================================================
+   MESSAGE AREA
+   ========================================================= */
 
 .cb-messages {
   flex: 1;
+
+  padding: 16px;
+
   overflow-y: auto;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background: var(--paper, #f6f7ff);
+
+  background: #ffffff;
+
+  scroll-behavior: smooth;
 }
+
+.cb-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.cb-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cb-messages::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 10px;
+}
+
+
+/* =========================================================
+   MESSAGES
+   ========================================================= */
 
 .cb-msg {
-  max-width: 85%;
-  padding: 9px 12px;
-  border-radius: var(--radius-md, 12px);
+  max-width: 84%;
+
+  margin-bottom: 12px;
+
+  padding: 10px 13px;
+
+  border-radius: 14px;
+
   font-size: 13px;
-  line-height: 1.45;
-  white-space: normal;
+  line-height: 1.55;
+
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+
+  animation: cb-message-in 0.18s ease;
 }
+
+@keyframes cb-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
+/* BOT */
 
 .cb-msg-bot {
-  align-self: flex-start;
-  background: var(--paper-raised, #fff);
-  border: 1px solid var(--line, #e5e8f2);
-  color: var(--ink, #17213d);
-  border-bottom-left-radius: 4px;
+  margin-right: auto;
+
+  background: var(--cb-bot-bg);
+  color: var(--cb-text);
+
+  border-bottom-left-radius: 5px;
 }
 
+
+/* USER */
+
 .cb-msg-user {
-  align-self: flex-end;
-  background: var(--seal, #4f46e5);
-  color: #fff;
-  border-bottom-right-radius: 4px;
+  margin-left: auto;
+
+  background: var(--cb-user-bg);
+  color: #ffffff;
+
+  border-bottom-right-radius: 5px;
 }
+
+
+/* =========================================================
+   BULLET TEXT
+   ========================================================= */
 
 .cb-bullet {
   display: block;
+
+  padding-left: 2px;
 }
 
+
+/* =========================================================
+   OFFICIAL SOURCE LINKS
+   ========================================================= */
+
+.cb-sources {
+  margin-top: 10px;
+
+  padding-top: 9px;
+
+  border-top: 1px solid #dfe3e8;
+}
+
+.cb-source-label {
+  margin-bottom: 5px;
+
+  font-size: 11px;
+  font-weight: 700;
+
+  color: #4b5563;
+}
+
+.cb-source-link {
+  display: block;
+
+  margin-top: 5px;
+
+  color: var(--cb-primary);
+
+  font-size: 12px;
+  font-weight: 600;
+
+  text-decoration: none;
+
+  line-height: 1.4;
+
+  transition:
+    color 0.15s ease;
+}
+
+.cb-source-link:hover {
+  color: var(--cb-primary-dark);
+  text-decoration: underline;
+}
+
+
+/* =========================================================
+   TYPING INDICATOR
+   ========================================================= */
+
 .cb-typing {
+  width: 58px;
+
   display: flex;
-  gap: 4px;
   align-items: center;
-  padding: 12px 14px;
+  justify-content: center;
+
+  gap: 4px;
+
+  padding: 11px 10px;
 }
 
 .cb-typing span {
   width: 6px;
   height: 6px;
+
   border-radius: 50%;
-  background: var(--ink-muted, #929bb0);
-  animation: cb-bounce 1.2s infinite ease-in-out;
+
+  background: #9ca3af;
+
+  animation: cb-dot 1.2s infinite ease-in-out;
 }
 
-.cb-typing span:nth-child(2) { animation-delay: 0.15s; }
-.cb-typing span:nth-child(3) { animation-delay: 0.3s; }
-
-@keyframes cb-bounce {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
-  30% { transform: translateY(-4px); opacity: 1; }
+.cb-typing span:nth-child(2) {
+  animation-delay: 0.15s;
 }
+
+.cb-typing span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes cb-dot {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+
+/* =========================================================
+   SUGGESTIONS
+   ========================================================= */
 
 .cb-suggestions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 14px 10px;
-  background: var(--paper, #f6f7ff);
+
+  gap: 7px;
+
+  padding: 8px 12px;
+
+  overflow-x: auto;
+
+  border-top: 1px solid var(--cb-border);
+
+  background: #ffffff;
+
+  flex-shrink: 0;
+
+  scrollbar-width: none;
+}
+
+.cb-suggestions::-webkit-scrollbar {
+  display: none;
 }
 
 .cb-chip {
-  border: 1px solid var(--line-dark, #d5d9e6);
-  background: var(--paper-raised, #fff);
-  color: var(--seal, #4f46e5);
+  flex: 0 0 auto;
+
+  border: 1px solid #d1d5db;
   border-radius: 999px;
-  padding: 5px 10px;
-  font-size: 11.5px;
+
+  background: #ffffff;
+  color: #374151;
+
+  padding: 7px 11px;
+
+  font-family: inherit;
+  font-size: 11px;
+
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .cb-chip:hover {
-  background: var(--seal-soft, #eef0ff);
-  border-color: var(--seal-light, #818cf8);
+  border-color: var(--cb-primary);
+  background: #eff6ff;
+  color: var(--cb-primary-dark);
 }
 
+
+/* =========================================================
+   INPUT AREA
+   ========================================================= */
+
 .cb-form {
+  min-height: 62px;
+
+  padding: 10px 12px;
+
+  border-top: 1px solid var(--cb-border);
+
+  background: #ffffff;
+
   display: flex;
+  align-items: center;
+
   gap: 8px;
-  padding: 10px;
-  border-top: 1px solid var(--line, #e5e8f2);
-  background: var(--paper-raised, #fff);
+
+  flex-shrink: 0;
 }
 
 .cb-input {
   flex: 1;
-  border: 1px solid var(--line-dark, #d5d9e6);
-  border-radius: var(--radius-sm, 8px);
-  padding: 8px 10px;
-  font-size: 13px;
+
+  min-width: 0;
+
+  height: 40px;
+
+  padding: 0 12px;
+
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+
+  outline: none;
+
+  background: #ffffff;
+  color: var(--cb-text);
+
   font-family: inherit;
-  color: var(--ink, #17213d);
+  font-size: 13px;
+
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.cb-input::placeholder {
+  color: #9ca3af;
 }
 
 .cb-input:focus {
-  outline: none;
-  border-color: var(--seal, #4f46e5);
+  border-color: var(--cb-primary);
+
+  box-shadow:
+    0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
+.cb-input:disabled {
+  background: #f9fafb;
+  cursor: not-allowed;
+}
+
+
+/* =========================================================
+   SEND BUTTON
+   ========================================================= */
+
 .cb-send {
+  width: 40px;
+  height: 40px;
+
+  flex-shrink: 0;
+
   border: none;
-  background: var(--seal, #4f46e5);
-  color: #fff;
-  border-radius: var(--radius-sm, 8px);
-  width: 36px;
+  border-radius: 10px;
+
+  background: var(--cb-primary);
+  color: #ffffff;
+
+  font-size: 17px;
+
   cursor: pointer;
-  font-size: 14px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
 }
 
 .cb-send:hover {
-  background: var(--seal-dark, #3730a3);
+  background: var(--cb-primary-dark);
+
+  transform: translateY(-1px);
 }
 
-@media (max-width: 420px) {
+.cb-send:active {
+  transform: scale(0.95);
+}
+
+.cb-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+
+/* =========================================================
+   TABLET
+   ========================================================= */
+
+@media (max-width: 700px) {
+
+  #cb-root {
+    right: 16px;
+    bottom: 16px;
+  }
+
+  .cb-panel {
+    width: min(
+      390px,
+      calc(100vw - 32px)
+    );
+
+    height: min(
+      560px,
+      calc(100vh - 105px)
+    );
+  }
+
+}
+
+
+/* =========================================================
+   MOBILE
+   ========================================================= */
+
+@media (max-width: 480px) {
+
   #cb-root {
     right: 12px;
     bottom: 12px;
   }
-  .cb-panel {
-    width: calc(100vw - 24px);
+
+  .cb-toggle {
+    width: 54px;
+    height: 54px;
   }
+
+  .cb-panel {
+    right: -4px;
+    bottom: 66px;
+
+    width: calc(100vw - 24px);
+
+    height: min(
+      560px,
+      calc(100vh - 88px)
+    );
+
+    border-radius: 16px;
+  }
+
+  .cb-header {
+    min-height: 64px;
+  }
+
+  .cb-messages {
+    padding: 12px;
+  }
+
+  .cb-msg {
+    max-width: 90%;
+
+    font-size: 12.5px;
+  }
+
+  .cb-input {
+    font-size: 12px;
+  }
+
+  .cb-chip {
+    font-size: 10.5px;
+  }
+
+}
+
+
+/* =========================================================
+   REDUCED MOTION
+   ========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+
+  .cb-panel,
+  .cb-msg,
+  .cb-toggle,
+  .cb-send {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .cb-messages {
+    scroll-behavior: auto;
+  }
+
+}
+#cb-panel[hidden] {
+  display: none !important;
 }

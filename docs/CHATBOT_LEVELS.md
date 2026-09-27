@@ -27,57 +27,37 @@ How it decides what to say, per message:
    / what's-next / overview) from a small set of regexes.
 4. Pull the answer straight from that step's (or task's) JSON fields.
 
-## Level 2 — done
+## Level 2 — the seam is in place, not yet implemented
 
-`chatbot.js` calls everything through one function, `getReply()`:
+`chatbot.js` already calls everything through one function, `getReply()`,
+which is the only thing that needs to change:
 
 ```js
 const CONFIG = {
-  mode: "llm",             // "rule" (Level 1) | "llm" (Level 2)
+  mode: "rule",           // flip to "llm" once the backend route below exists
   llmEndpoint: "/api/chat"
 };
 ```
 
 `getReply()` tries the configured mode and **falls back to the rule engine on
-any failure**, so switching `mode` back and forth (or leaving `ANTHROPIC_API_KEY`
-unset) is always safe — you'll never end up with a widget that just breaks.
+any failure**, so switching `mode` back and forth is always safe — you'll
+never end up with a widget that just breaks.
 
-```
-   chatbot.js (mode: "llm")
-       │
-       ├─ callLlmBackend(text) ──► POST {API.baseUrl}/api/chat
-       │        { message, history }        │
-       │                                     ▼
-       │                          backend/routes/chat.js
-       │                            - loads backend/data/tasks.json
-       │                            - builds a system prompt: "answer only
-       │                              from this JSON, don't invent facts"
-       │                            - calls the Anthropic Messages API
-       │                              with the ANTHROPIC_API_KEY from
-       │                              backend/.env (never sent to the browser)
-       │                                     │
-       │                          ◄──────────┘ { reply }
-       ▼
-  on any error/501 → ruleBasedReply(text)   (Level 1, unchanged)
-```
+A matching backend stub already exists: `backend/routes/chat.js`, mounted at
+`POST /api/chat` in `server.js`. It currently just returns a 501. To finish
+Level 2:
 
-To turn it on:
+1. Add your LLM API key to `backend/.env` — **never** put it in frontend code.
+2. In `backend/routes/chat.js`, call the LLM SDK with the request body
+   (`{ message, history }`) plus the relevant task JSON as grounding context,
+   so it answers from your real fees/documents/offices instead of guessing.
+3. Return `{ reply: "..." }`.
+4. In `chatbot.js`, implement `callLlmBackend()` to `fetch(CONFIG.llmEndpoint, …)`
+   and flip `CONFIG.mode` to `"llm"`.
 
-1. `cp backend/.env.example backend/.env` and add your `ANTHROPIC_API_KEY`.
-   Without this, `/api/chat` returns 501 and the widget quietly runs in
-   Level 1 mode — nothing breaks.
-2. `npm start` in `backend/` (picks up `backend/.env` automatically via
-   `process.loadEnvFile()` — no extra dependency).
-
-The whole 4-task dataset (~16KB) is sent as grounding context on every
-request rather than pre-selecting a subset — small enough that it's simpler
-and more accurate than trying to guess which task a message is about before
-calling the model. The system prompt instructs the model to answer only from
-that JSON and to point to a step's `sourceUrl` rather than invent facts.
-
-`history` (the rolling last-12-turns array `chatbot.js` already tracked in
-Level 1) is now sent with every request so follow-ups like "how much does
-that cost?" resolve correctly.
+`chatbot.js` already keeps a rolling `history` array (last 12 turns) for
+exactly this — Level 1 doesn't use it, but it's there so follow-up questions
+work once an LLM is answering.
 
 ## Level 3 — building blocks that already exist elsewhere in this repo
 
