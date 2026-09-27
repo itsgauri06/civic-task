@@ -49,6 +49,14 @@
   overflow: hidden;
 }
 
+/* Without this, the browser's default [hidden] { display: none } loses to
+   the .cb-panel { display: flex } rule above (same specificity, author
+   stylesheet wins) — so setting panel.hidden = true in JS silently does
+   nothing and the close (×) button and toggle both appear broken. */
+.cb-panel[hidden] {
+  display: none;
+}
+
 .cb-header {
   display: flex;
   align-items: flex-start;

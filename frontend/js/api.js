@@ -193,5 +193,7 @@ const API = (() => {
   return {
     listTasks, getTask, resolveTask, isLiveBackend,
     getAdminTask, updateStep, addStep, deleteStep,
+    baseUrl: BASE_URL, // exposed so other frontend files (e.g. chatbot.js)
+                        // hit the same backend without duplicating the URL
   };
 })();
